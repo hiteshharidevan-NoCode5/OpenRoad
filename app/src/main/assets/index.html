@@ -10,7 +10,6 @@
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     body, html { width: 100%; height: 100%; overflow: hidden; font-family: system-ui, -apple-system, sans-serif; }
     #map { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
-
     .nav-box {
       position: absolute; top: 12px; left: 12px; right: 12px;
       background: #ffffff; border-radius: 16px; padding: 12px;
@@ -27,7 +26,6 @@
       background: #1a73e8; color: white; border: none; border-radius: 8px;
       padding: 10px; font-size: 15px; font-weight: 600; cursor: pointer; text-align: center;
     }
-
     #turn-banner {
       position: absolute; top: 12px; left: 12px; right: 12px;
       background: #1e8e3e; color: white; border-radius: 16px; padding: 14px 18px;
@@ -38,7 +36,6 @@
     .turn-text { flex: 1; }
     .turn-dist { font-size: 20px; font-weight: 700; }
     .turn-street { font-size: 15px; opacity: 0.9; margin-top: 2px; }
-
     #route-summary {
       position: absolute; bottom: 0; left: 0; right: 0;
       background: white; border-radius: 20px 20px 0 0;
@@ -59,7 +56,6 @@
   </style>
 </head>
 <body>
-
   <div class="nav-box" id="navCard">
     <div class="input-row">
       <span>From:</span>
@@ -71,7 +67,6 @@
     </div>
     <button class="route-btn" onclick="calculateRoute()">Get Directions</button>
   </div>
-
   <div id="turn-banner">
     <div class="turn-icon" id="turnIcon">⬆️</div>
     <div class="turn-text">
@@ -79,9 +74,7 @@
       <div class="turn-street" id="maneuverInstruction">Proceed to route</div>
     </div>
   </div>
-
   <div id="map"></div>
-
   <div id="route-summary">
     <div class="summary-row">
       <div>
@@ -91,7 +84,6 @@
       <button class="start-nav-btn" id="navToggleBtn" onclick="toggleNavigation()">Start</button>
     </div>
   </div>
-
   <script>
     const map = new maplibregl.Map({
       container: "map",
@@ -225,5 +217,59 @@
     function stopNavigation() {
       isNavigating = false;
       if (watchId) navigator.geolocation.clearWatch(watchId);
-      
-404: Not Found
+      document.getElementById("navCard").style.display = "flex";
+      document.getElementById("turn-banner").style.display = "none";
+      const btn = document.getElementById("navToggleBtn");
+      btn.innerText = "Start";
+      btn.className = "start-nav-btn";
+      map.easeTo({ pitch: 0, zoom: 14 });
+      if (userPuck) userPuck.remove();
+      speak("Navigation ended.");
+    }
+
+    function getDistance(c1, c2) {
+      const R = 6371e3;
+      const dLat = (c2[1] - c1[1]) * Math.PI / 180;
+      const dLon = (c2[0] - c1[0]) * Math.PI / 180;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(c1[1] * Math.PI / 180) * Math.cos(c2[1] * Math.PI / 180) *
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    function updateNavigationState(pos) {
+      const userCoord = [pos.coords.longitude, pos.coords.latitude];
+      const heading = pos.coords.heading || 0;
+      map.easeTo({ center: userCoord, bearing: heading, duration: 800 });
+
+      if (!userPuck) {
+        userPuck = new maplibregl.Marker({ color: "#00c853" }).setLngLat(userCoord).addTo(map);
+      } else {
+        userPuck.setLngLat(userCoord);
+      }
+
+      if (navSteps.length > 0) {
+        const nextStep = navSteps[0];
+        const stepCoord = nextStep.maneuver.location;
+        const dist = Math.round(getDistance(userCoord, stepCoord));
+
+        document.getElementById("maneuverDist").innerText = dist > 1000 ? (dist/1000).toFixed(1) + " km" : dist + " m";
+        let instruction = nextStep.maneuver.instruction || (nextStep.name ? "Continue on " + nextStep.name : "Proceed along route");
+        document.getElementById("maneuverInstruction").innerText = instruction;
+
+        const type = nextStep.maneuver.modifier || nextStep.maneuver.type;
+        if (type && type.includes("left")) document.getElementById("turnIcon").innerText = "⬅️";
+        else if (type && type.includes("right")) document.getElementById("turnIcon").innerText = "➡️";
+        else document.getElementById("turnIcon").innerText = "⬆️";
+
+        if (dist <= 150 && dist > 30) {
+          speak("In " + dist + " meters, " + instruction);
+        }
+        if (dist < 25) {
+          navSteps.shift();
+        }
+      }
+    }
+  </script>
+</body>
+</html>
