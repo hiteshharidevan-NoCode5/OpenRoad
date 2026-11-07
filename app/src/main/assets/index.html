@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>OpenRoad</title>
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body, html { width: 100%; height: 100%; overflow: hidden; font-family: system-ui, -apple-system, sans-serif; }
+    #map { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+    .search-card {
+      position: absolute; top: 16px; left: 14px; right: 14px;
+      background: #ffffff; border-radius: 28px; padding: 6px 14px;
+      display: flex; align-items: center; gap: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2); z-index: 10;
+    }
+    .search-card input { flex: 1; border: none; outline: none; font-size: 16px; padding: 8px 0; }
+    .search-btn { background: #1a73e8; border: none; color: white; padding: 8px 16px; border-radius: 20px; font-weight: 600; cursor: pointer; }
+    .fab {
+      position: absolute; bottom: 28px; right: 18px;
+      width: 52px; height: 52px; border-radius: 50%;
+      background: white; border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+      font-size: 22px; display: flex; align-items: center; justify-content: center;
+      z-index: 10; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="search-card">
+    <input type="text" id="searchInput" placeholder="Search destination..." />
+    <button class="search-btn" onclick="executeSearch()">Go</button>
+  </div>
+  <div id="map"></div>
+  <button class="fab" onclick="locateUser()">🎯</button>
+
+  <script>
+    // Direct, free OpenStreetMap tiles with no API key requirement
+    const map = new maplibregl.Map({
+      container: 'map',
+      style: {
+        version: 8,
+        sources: {
+          'osm-tiles': {
+            type: 'raster',
+            tiles: [
+              'https://tile.openstreetmap.org/{z}/{x}/{y}.png'
+            ],
+            tileSize: 256,
+            attribution: '© OpenStreetMap contributors'
+          }
+        },
+        layers: [
+          {
+            id: 'osm-layer',
+            type: 'raster',
+            source: 'osm-tiles',
+            minzoom: 0,
+            maxzoom: 19
+          }
+        ]
+      },
+      center: [72.5714, 23.0225],
+      zoom: 13
+    });
+
+    let userMarker = null;
+
+    function locateUser() {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(pos => {
+          const loc = [pos.coords.longitude, pos.coords.latitude];
+          map.flyTo({ center: loc, zoom: 16 });
+          if (userMarker) userMarker.remove();
+          userMarker = new maplibregl.Marker({ color: '#1a73e8' }).setLngLat(loc).addTo(map);
+        }, () => {
+          alert('Please enable location access in Chrome settings.');
+        }, { enableHighAccuracy: true });
+      }
+    }
+
+    async function executeSearch() {
+      const q = document.getElementById('searchInput').value.trim();
+      if (!q) return;
+      try {
+        const res = await fetch(`https://photon.komoot.io/api/?q=${encodeURIComponent(q)}&limit=1`);
+        const data = await res.json();
+        if (data.features && data.features.length > 0) {
+          const dest = data.features[0].geometry.coordinates;
+          map.flyTo({ center: dest, zoom: 15 });
+          new maplibregl.Marker({ color: '#ea4335' }).setLngLat(dest).addTo(map);
+        } else {
+          alert('Location not found');
+        }
+      } catch (e) {
+        alert('Network error while searching');
+      }
+    }
+  </script>
+</body>
+</html>
