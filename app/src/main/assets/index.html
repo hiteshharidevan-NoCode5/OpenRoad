@@ -7,11 +7,12 @@
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
     body, html { width: 100%; height: 100%; overflow: hidden; font-family: system-ui, -apple-system, sans-serif; }
     #map { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+
     .nav-box {
-      position: absolute; top: 14px; left: 12px; right: 12px;
+      position: absolute; top: 12px; left: 12px; right: 12px;
       background: #ffffff; border-radius: 16px; padding: 12px;
       box-shadow: 0 4px 16px rgba(0,0,0,0.22); z-index: 10;
       display: flex; flex-direction: column; gap: 8px;
@@ -26,28 +27,43 @@
       background: #1a73e8; color: white; border: none; border-radius: 8px;
       padding: 10px; font-size: 15px; font-weight: 600; cursor: pointer; text-align: center;
     }
-    .fab {
-      position: absolute; bottom: 24px; right: 16px;
-      width: 50px; height: 50px; border-radius: 50%;
-      background: white; border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.25);
-      font-size: 22px; display: flex; align-items: center; justify-content: center;
-      z-index: 10; cursor: pointer;
+
+    #turn-banner {
+      position: absolute; top: 12px; left: 12px; right: 12px;
+      background: #1e8e3e; color: white; border-radius: 16px; padding: 14px 18px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3); z-index: 25;
+      display: none; align-items: center; gap: 14px;
     }
+    .turn-icon { font-size: 32px; font-weight: bold; }
+    .turn-text { flex: 1; }
+    .turn-dist { font-size: 20px; font-weight: 700; }
+    .turn-street { font-size: 15px; opacity: 0.9; margin-top: 2px; }
+
     #route-summary {
       position: absolute; bottom: 0; left: 0; right: 0;
       background: white; border-radius: 20px 20px 0 0;
-      padding: 18px 20px; box-shadow: 0 -4px 16px rgba(0,0,0,0.18);
+      padding: 16px 20px; box-shadow: 0 -4px 16px rgba(0,0,0,0.18);
       display: none; z-index: 15;
     }
+    .summary-row { display: flex; justify-content: space-between; align-items: center; }
     .summary-time { font-size: 22px; font-weight: 700; color: #1e8e3e; }
-    .summary-dist { font-size: 15px; color: #5f6368; margin-top: 2px; }
+    .summary-dist { font-size: 15px; color: #5f6368; }
+    .start-nav-btn {
+      background: #1a73e8; color: white; border: none; border-radius: 24px;
+      padding: 10px 22px; font-size: 15px; font-weight: 600; cursor: pointer;
+    }
+    .stop-nav-btn {
+      background: #d93025; color: white; border: none; border-radius: 24px;
+      padding: 10px 22px; font-size: 15px; font-weight: 600; cursor: pointer;
+    }
   </style>
 </head>
 <body>
-  <div class="nav-box">
+
+  <div class="nav-box" id="navCard">
     <div class="input-row">
       <span>From:</span>
-      <input type="text" id="startInput" placeholder="Your location or city..." value="My Location" />
+      <input type="text" id="startInput" placeholder="Your location..." value="My Location" />
     </div>
     <div class="input-row">
       <span>To:</span>
@@ -55,12 +71,27 @@
     </div>
     <button class="route-btn" onclick="calculateRoute()">Get Directions</button>
   </div>
-  <div id="map"></div>
-  <button class="fab" onclick="locateUser()">🎯</button>
-  <div id="route-summary">
-    <div class="summary-time" id="timeVal">-- min</div>
-    <div class="summary-dist" id="distVal">-- km</div>
+
+  <div id="turn-banner">
+    <div class="turn-icon" id="turnIcon">⬆️</div>
+    <div class="turn-text">
+      <div class="turn-dist" id="maneuverDist">-- m</div>
+      <div class="turn-street" id="maneuverInstruction">Proceed to route</div>
+    </div>
   </div>
+
+  <div id="map"></div>
+
+  <div id="route-summary">
+    <div class="summary-row">
+      <div>
+        <div class="summary-time" id="timeVal">-- min</div>
+        <div class="summary-dist" id="distVal">-- km</div>
+      </div>
+      <button class="start-nav-btn" id="navToggleBtn" onclick="toggleNavigation()">Start</button>
+    </div>
+  </div>
+
   <script>
     const map = new maplibregl.Map({
       container: "map",
@@ -79,9 +110,15 @@
       center: [72.5714, 23.0225],
       zoom: 12
     });
+
     let currentPos = null;
     let startMarker = null;
     let endMarker = null;
+    let userPuck = null;
+    let navSteps = [];
+    let isNavigating = false;
+    let watchId = null;
+    let lastSpokenText = "";
 
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(pos => {
@@ -89,15 +126,13 @@
       }, null, { enableHighAccuracy: true });
     }
 
-    function locateUser() {
-      if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(pos => {
-          currentPos = [pos.coords.longitude, pos.coords.latitude];
-          map.flyTo({ center: currentPos, zoom: 15 });
-          if (startMarker) startMarker.remove();
-          startMarker = new maplibregl.Marker({ color: "#1a73e8" }).setLngLat(currentPos).addTo(map);
-          document.getElementById("startInput").value = "My Location";
-        }, () => alert("Please enable location access."));
+    function speak(text) {
+      if ("speechSynthesis" in window && text !== lastSpokenText) {
+        window.speechSynthesis.cancel();
+        const utter = new SpeechSynthesisUtterance(text);
+        utter.rate = 1.0;
+        window.speechSynthesis.speak(utter);
+        lastSpokenText = text;
       }
     }
 
@@ -113,53 +148,82 @@
     async function calculateRoute() {
       const startText = document.getElementById("startInput").value.trim();
       const destText = document.getElementById("destInput").value.trim();
-      if (!destText) { alert("Please enter a destination."); return; }
+      if (!destText) return;
 
       let startCoords = (startText === "My Location" && currentPos) ? currentPos : await geocode(startText);
       const destCoords = await geocode(destText);
 
-      if (!startCoords) { alert("Could not locate start point."); return; }
-      if (!destCoords) { alert("Could not locate destination."); return; }
+      if (!startCoords || !destCoords) {
+        alert("Unable to find location");
+        return;
+      }
 
       if (startMarker) startMarker.remove();
       if (endMarker) endMarker.remove();
       startMarker = new maplibregl.Marker({ color: "#1a73e8" }).setLngLat(startCoords).addTo(map);
       endMarker = new maplibregl.Marker({ color: "#ea4335" }).setLngLat(destCoords).addTo(map);
 
-      const url = "https://router.project-osrm.org/route/v1/driving/" + startCoords[0] + "," + startCoords[1] + ";" + destCoords[0] + "," + destCoords[1] + "?overview=full&geometries=geojson";
-      try {
-        const res = await fetch(url);
-        const data = await res.json();
-        if (data.routes && data.routes.length > 0) {
-          const route = data.routes[0];
-          const geojson = { type: "Feature", geometry: route.geometry };
-          if (map.getSource("route")) {
-            map.getSource("route").setData(geojson);
-          } else {
-            map.addSource("route", { type: "geojson", data: geojson });
-            map.addLayer({
-              id: "route",
-              type: "line",
-              source: "route",
-              layout: { "line-join": "round", "line-cap": "round" },
-              paint: { "line-color": "#1a73e8", "line-width": 6 }
-            });
-          }
-          const coordinates = route.geometry.coordinates;
-          const bounds = coordinates.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(coordinates[0], coordinates[0]));
-          map.fitBounds(bounds, { padding: 60 });
+      const url = "https://router.project-osrm.org/route/v1/driving/" + startCoords[0] + "," + startCoords[1] + ";" + destCoords[0] + "," + destCoords[1] + "?overview=full&geometries=geojson&steps=true";
+      const res = await fetch(url);
+      const data = await res.json();
 
-          const mins = Math.round(route.duration / 60);
-          const hrs = Math.floor(mins / 60);
-          const remMins = mins % 60;
-          document.getElementById("timeVal").innerText = hrs > 0 ? (hrs + " hr " + remMins + " min") : (mins + " min");
-          document.getElementById("distVal").innerText = (route.distance / 1000).toFixed(1) + " km";
-          document.getElementById("route-summary").style.display = "block";
+      if (data.routes && data.routes.length > 0) {
+        const route = data.routes[0];
+        navSteps = route.legs[0].steps;
+
+        const geojson = { type: "Feature", geometry: route.geometry };
+        if (map.getSource("route")) {
+          map.getSource("route").setData(geojson);
+        } else {
+          map.addSource("route", { type: "geojson", data: geojson });
+          map.addLayer({
+            id: "route",
+            type: "line",
+            source: "route",
+            layout: { "line-join": "round", "line-cap": "round" },
+            paint: { "line-color": "#1a73e8", "line-width": 6 }
+          });
         }
-      } catch (err) {
-        alert("Error fetching route.");
+
+        const coordinates = route.geometry.coordinates;
+        const bounds = coordinates.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(coordinates[0], coordinates[0]));
+        map.fitBounds(bounds, { padding: 60 });
+
+        const mins = Math.round(route.duration / 60);
+        const hrs = Math.floor(mins / 60);
+        const remMins = mins % 60;
+        document.getElementById("timeVal").innerText = hrs > 0 ? (hrs + " hr " + remMins + " min") : (mins + " min");
+        document.getElementById("distVal").innerText = (route.distance / 1000).toFixed(1) + " km";
+        document.getElementById("route-summary").style.display = "block";
       }
     }
-  </script>
-</body>
-</html>
+
+    function toggleNavigation() {
+      if (!isNavigating) startNavigation();
+      else stopNavigation();
+    }
+
+    function startNavigation() {
+      if (!navSteps || navSteps.length === 0) return;
+      isNavigating = true;
+      document.getElementById("navCard").style.display = "none";
+      document.getElementById("turn-banner").style.display = "flex";
+      const btn = document.getElementById("navToggleBtn");
+      btn.innerText = "Exit";
+      btn.className = "stop-nav-btn";
+      map.easeTo({ pitch: 50, zoom: 17 });
+
+      if (navigator.geolocation) {
+        watchId = navigator.geolocation.watchPosition(updateNavigationState, null, {
+          enableHighAccuracy: true,
+          maximumAge: 1000
+        });
+      }
+      speak("Starting navigation. Proceed to the highlighted route.");
+    }
+
+    function stopNavigation() {
+      isNavigating = false;
+      if (watchId) navigator.geolocation.clearWatch(watchId);
+      
+404: Not Found
