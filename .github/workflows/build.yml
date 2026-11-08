@@ -22,14 +22,17 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
 
-      - name: Ensure Wrapper Exists
+      - name: Pre-fetch Gradle Distribution
         run: |
-          if [ ! -f "./gradlew" ]; then
-            gradle wrapper \
-              --gradle-distribution-url "https://github.com/gradle/gradle-distributions/releases/download/v8.5.0/gradle-8.5-bin.zip" \
-              --no-validate-url
-            chmod +x ./gradlew
-          fi
+          mkdir -p gradle-dist
+          curl -L --retry 5 --retry-delay 3 --connect-timeout 30 \
+            -o gradle-dist/gradle-8.5-bin.zip \
+            https://github.com/gradle/gradle-distributions/releases/download/v8.5.0/gradle-8.5-bin.zip
+          
+          # Generate wrapper targeting the locally downloaded distribution file
+          DIST_PATH="file://$(pwd)/gradle-dist/gradle-8.5-bin.zip"
+          gradle wrapper --gradle-distribution-url "$DIST_PATH" --no-validate-url
+          chmod +x ./gradlew
 
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon
