@@ -7,9 +7,9 @@
   <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body, html { width: 100%; height: 100%; overflow: hidden; font-family: system-ui, -apple-system, sans-serif; }
-    #map { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+    #map { width: 100%; height: 100%; position: absolute; top: 0; left: 0; background: #e5e3df; }
     .nav-box {
       position: absolute; top: 12px; left: 12px; right: 12px;
       background: #ffffff; border-radius: 16px; padding: 12px;
@@ -32,10 +32,10 @@
       box-shadow: 0 4px 16px rgba(0,0,0,0.3); z-index: 25;
       display: none; align-items: center; gap: 14px;
     }
-    .turn-icon { font-size: 32px; font-weight: bold; }
+    .turn-icon { font-size: 28px; font-weight: bold; }
     .turn-text { flex: 1; }
     .turn-dist { font-size: 20px; font-weight: 700; }
-    .turn-street { font-size: 15px; opacity: 0.9; margin-top: 2px; }
+    .turn-street { font-size: 14px; opacity: 0.9; margin-top: 2px; }
     #route-summary {
       position: absolute; bottom: 0; left: 0; right: 0;
       background: white; border-radius: 20px 20px 0 0;
@@ -59,22 +59,25 @@
   <div class="nav-box" id="navCard">
     <div class="input-row">
       <span>From:</span>
-      <input type="text" id="startInput" placeholder="Your location..." value="My Location" />
+      <input type="text" id="startInput" placeholder="Locating..." value="My Location" />
     </div>
     <div class="input-row">
       <span>To:</span>
       <input type="text" id="destInput" placeholder="Enter destination..." />
     </div>
-    <button class="route-btn" onclick="calculateRoute()">Get Directions</button>
+    <button class="route-btn" id="goBtn" onclick="calculateRoute()">Get Directions</button>
   </div>
+
   <div id="turn-banner">
-    <div class="turn-icon" id="turnIcon">⬆️</div>
+    <div class="turn-icon" id="turnIcon">^</div>
     <div class="turn-text">
       <div class="turn-dist" id="maneuverDist">-- m</div>
       <div class="turn-street" id="maneuverInstruction">Proceed to route</div>
     </div>
   </div>
+
   <div id="map"></div>
+
   <div id="route-summary">
     <div class="summary-row">
       <div>
@@ -84,7 +87,11 @@
       <button class="start-nav-btn" id="navToggleBtn" onclick="toggleNavigation()">Start</button>
     </div>
   </div>
+
   <script>
+    // Default Ahmedabad focus
+    const DEFAULT_AHM = [72.5310, 23.0300];
+
     const map = new maplibregl.Map({
       container: "map",
       style: {
@@ -94,59 +101,82 @@
             type: "raster",
             tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
             tileSize: 256,
-            attribution: "© OpenStreetMap contributors"
+            attribution: "OpenStreetMap contributors"
           }
         },
         layers: [{ id: "osm-layer", type: "raster", source: "osm-tiles", minzoom: 0, maxzoom: 19 }]
       },
-      center: [72.5714, 23.0225],
-      zoom: 12
+      center: DEFAULT_AHM,
+      zoom: 13
     });
 
-    let currentPos = null;
+    let currentPos = DEFAULT_AHM;
     let startMarker = null;
     let endMarker = null;
     let userPuck = null;
     let navSteps = [];
     let isNavigating = false;
     let watchId = null;
-    let lastSpokenText = "";
 
+    // Grab actual GPS coordinate on boot
     if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(pos => {
+      navigator.geolocation.getCurrentPosition(function(pos) {
         currentPos = [pos.coords.longitude, pos.coords.latitude];
+        map.setCenter(currentPos);
       }, null, { enableHighAccuracy: true });
     }
 
     function speak(text) {
-      if ("speechSynthesis" in window && text !== lastSpokenText) {
+      if ("speechSynthesis" in window) {
         window.speechSynthesis.cancel();
         const utter = new SpeechSynthesisUtterance(text);
         utter.rate = 1.0;
         window.speechSynthesis.speak(utter);
-        lastSpokenText = text;
       }
     }
 
+    // Geocoder biased strictly around the current user coordinates
     async function geocode(query) {
-      const res = await fetch("https://photon.komoot.io/api/?q=" + encodeURIComponent(query) + "&limit=1");
-      const data = await res.json();
-      if (data.features && data.features.length > 0) {
-        return data.features[0].geometry.coordinates;
-      }
+      const clean = query.replace(/behind.*/i, "").replace(/near.*/i, "").trim();
+      const refPos = currentPos || DEFAULT_AHM;
+      // Added &lat and &lon for local search bias
+      const url = "https://photon.komoot.io/api/?q=" + encodeURIComponent(clean) +
+                  "&lat=" + refPos[1] + "&lon=" + refPos[0] + "&limit=1";
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.features && data.features.length > 0) {
+          return data.features[0].geometry.coordinates;
+        }
+      } catch (e) {}
       return null;
     }
 
     async function calculateRoute() {
+      const btn = document.getElementById("goBtn");
+      btn.innerText = "Finding route...";
       const startText = document.getElementById("startInput").value.trim();
       const destText = document.getElementById("destInput").value.trim();
-      if (!destText) return;
 
-      let startCoords = (startText === "My Location" && currentPos) ? currentPos : await geocode(startText);
-      const destCoords = await geocode(destText);
+      if (!destText) {
+        alert("Please enter a destination");
+        btn.innerText = "Get Directions";
+        return;
+      }
 
-      if (!startCoords || !destCoords) {
-        alert("Unable to find location");
+      let startCoords = (startText.toLowerCase() === "my location") ? currentPos : await geocode(startText);
+      let destCoords = await geocode(destText);
+
+      // If strict place name fails, append local city context automatically
+      if (!destCoords && !destText.toLowerCase().includes("ahmedabad")) {
+        destCoords = await geocode(destText + ", Ahmedabad");
+      }
+
+      if (!startCoords) startCoords = DEFAULT_AHM;
+
+      if (!destCoords) {
+        alert("Could not find destination. Try: Star Bazaar, Satellite");
+        btn.innerText = "Get Directions";
         return;
       }
 
@@ -155,39 +185,50 @@
       startMarker = new maplibregl.Marker({ color: "#1a73e8" }).setLngLat(startCoords).addTo(map);
       endMarker = new maplibregl.Marker({ color: "#ea4335" }).setLngLat(destCoords).addTo(map);
 
-      const url = "https://router.project-osrm.org/route/v1/driving/" + startCoords[0] + "," + startCoords[1] + ";" + destCoords[0] + "," + destCoords[1] + "?overview=full&geometries=geojson&steps=true";
-      const res = await fetch(url);
-      const data = await res.json();
+      const osrmUrl = "https://router.project-osrm.org/route/v1/driving/" +
+                      startCoords[0] + "," + startCoords[1] + ";" +
+                      destCoords[0] + "," + destCoords[1] +
+                      "?overview=full&geometries=geojson&steps=true";
 
-      if (data.routes && data.routes.length > 0) {
-        const route = data.routes[0];
-        navSteps = route.legs[0].steps;
+      try {
+        const res = await fetch(osrmUrl);
+        const data = await res.json();
 
-        const geojson = { type: "Feature", geometry: route.geometry };
-        if (map.getSource("route")) {
-          map.getSource("route").setData(geojson);
+        if (data.routes && data.routes.length > 0) {
+          const route = data.routes[0];
+          navSteps = route.legs[0].steps;
+
+          const geojson = { type: "Feature", geometry: route.geometry };
+          if (map.getSource("route")) {
+            map.getSource("route").setData(geojson);
+          } else {
+            map.addSource("route", { type: "geojson", data: geojson });
+            map.addLayer({
+              id: "route",
+              type: "line",
+              source: "route",
+              layout: { "line-join": "round", "line-cap": "round" },
+              paint: { "line-color": "#1a73e8", "line-width": 6 }
+            });
+          }
+
+          const coords = route.geometry.coordinates;
+          const bounds = coords.reduce(function(b, c) { return b.extend(c); }, new maplibregl.LngLatBounds(coords[0], coords[0]));
+          map.fitBounds(bounds, { padding: 60 });
+
+          const mins = Math.round(route.duration / 60);
+          const hrs = Math.floor(mins / 60);
+          const remMins = mins % 60;
+          document.getElementById("timeVal").innerText = hrs > 0 ? (hrs + " hr " + remMins + " min") : (mins + " min");
+          document.getElementById("distVal").innerText = (route.distance / 1000).toFixed(1) + " km";
+          document.getElementById("route-summary").style.display = "block";
         } else {
-          map.addSource("route", { type: "geojson", data: geojson });
-          map.addLayer({
-            id: "route",
-            type: "line",
-            source: "route",
-            layout: { "line-join": "round", "line-cap": "round" },
-            paint: { "line-color": "#1a73e8", "line-width": 6 }
-          });
+          alert("No direct driving path found.");
         }
-
-        const coordinates = route.geometry.coordinates;
-        const bounds = coordinates.reduce((b, c) => b.extend(c), new maplibregl.LngLatBounds(coordinates[0], coordinates[0]));
-        map.fitBounds(bounds, { padding: 60 });
-
-        const mins = Math.round(route.duration / 60);
-        const hrs = Math.floor(mins / 60);
-        const remMins = mins % 60;
-        document.getElementById("timeVal").innerText = hrs > 0 ? (hrs + " hr " + remMins + " min") : (mins + " min");
-        document.getElementById("distVal").innerText = (route.distance / 1000).toFixed(1) + " km";
-        document.getElementById("route-summary").style.display = "block";
+      } catch (err) {
+        alert("Routing service timeout. Please retry.");
       }
+      btn.innerText = "Get Directions";
     }
 
     function toggleNavigation() {
@@ -211,7 +252,7 @@
           maximumAge: 1000
         });
       }
-      speak("Starting navigation. Proceed to the highlighted route.");
+      speak("Starting navigation. Follow the route.");
     }
 
     function stopNavigation() {
@@ -257,10 +298,10 @@
         let instruction = nextStep.maneuver.instruction || (nextStep.name ? "Continue on " + nextStep.name : "Proceed along route");
         document.getElementById("maneuverInstruction").innerText = instruction;
 
-        const type = nextStep.maneuver.modifier || nextStep.maneuver.type;
-        if (type && type.includes("left")) document.getElementById("turnIcon").innerText = "⬅️";
-        else if (type && type.includes("right")) document.getElementById("turnIcon").innerText = "➡️";
-        else document.getElementById("turnIcon").innerText = "⬆️";
+        const type = nextStep.maneuver.modifier || nextStep.maneuver.type || "";
+        if (type.includes("left")) document.getElementById("turnIcon").innerText = "<";
+        else if (type.includes("right")) document.getElementById("turnIcon").innerText = ">";
+        else document.getElementById("turnIcon").innerText = "^";
 
         if (dist <= 150 && dist > 30) {
           speak("In " + dist + " meters, " + instruction);
