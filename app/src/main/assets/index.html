@@ -89,7 +89,6 @@
   </div>
 
   <script>
-    // Default Ahmedabad focus
     const DEFAULT_AHM = [72.5310, 23.0300];
 
     const map = new maplibregl.Map({
@@ -118,7 +117,6 @@
     let isNavigating = false;
     let watchId = null;
 
-    // Grab actual GPS coordinate on boot
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(function(pos) {
         currentPos = [pos.coords.longitude, pos.coords.latitude];
@@ -135,11 +133,9 @@
       }
     }
 
-    // Geocoder biased strictly around the current user coordinates
     async function geocode(query) {
       const clean = query.replace(/behind.*/i, "").replace(/near.*/i, "").trim();
       const refPos = currentPos || DEFAULT_AHM;
-      // Added &lat and &lon for local search bias
       const url = "https://photon.komoot.io/api/?q=" + encodeURIComponent(clean) +
                   "&lat=" + refPos[1] + "&lon=" + refPos[0] + "&limit=1";
       try {
@@ -167,7 +163,6 @@
       let startCoords = (startText.toLowerCase() === "my location") ? currentPos : await geocode(startText);
       let destCoords = await geocode(destText);
 
-      // If strict place name fails, append local city context automatically
       if (!destCoords && !destText.toLowerCase().includes("ahmedabad")) {
         destCoords = await geocode(destText + ", Ahmedabad");
       }
@@ -175,7 +170,7 @@
       if (!startCoords) startCoords = DEFAULT_AHM;
 
       if (!destCoords) {
-        alert("Could not find destination. Try: Star Bazaar, Satellite");
+        alert("Could not locate destination. Please check spelling.");
         btn.innerText = "Get Directions";
         return;
       }
@@ -185,10 +180,11 @@
       startMarker = new maplibregl.Marker({ color: "#1a73e8" }).setLngLat(startCoords).addTo(map);
       endMarker = new maplibregl.Marker({ color: "#ea4335" }).setLngLat(destCoords).addTo(map);
 
+      // radiuses=50;100 restricts destination snapping to wider primary/secondary road networks
       const osrmUrl = "https://router.project-osrm.org/route/v1/driving/" +
                       startCoords[0] + "," + startCoords[1] + ";" +
                       destCoords[0] + "," + destCoords[1] +
-                      "?overview=full&geometries=geojson&steps=true";
+                      "?overview=full&geometries=geojson&steps=true&radiuses=50;100&continue_straight=true";
 
       try {
         const res = await fetch(osrmUrl);
@@ -223,10 +219,10 @@
           document.getElementById("distVal").innerText = (route.distance / 1000).toFixed(1) + " km";
           document.getElementById("route-summary").style.display = "block";
         } else {
-          alert("No direct driving path found.");
+          alert("No direct road route found.");
         }
       } catch (err) {
-        alert("Routing service timeout. Please retry.");
+        alert("Routing server request timed out.");
       }
       btn.innerText = "Get Directions";
     }
@@ -252,7 +248,7 @@
           maximumAge: 1000
         });
       }
-      speak("Starting navigation. Follow the route.");
+      speak("Starting navigation. Follow the highlighted route.");
     }
 
     function stopNavigation() {
