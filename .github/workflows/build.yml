@@ -25,7 +25,9 @@ jobs:
       - name: Ensure Wrapper Exists
         run: |
           if [ ! -f "./gradlew" ]; then
-            gradle wrapper --gradle-version 8.5
+            gradle wrapper \
+              --gradle-distribution-url "https://github.com/gradle/gradle-distributions/releases/download/v8.5.0/gradle-8.5-bin.zip" \
+              --no-validate-url
             chmod +x ./gradlew
           fi
 
